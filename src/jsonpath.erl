@@ -23,112 +23,102 @@
 %% @copyright (c) 2012 Gene Stevens.  All Rights Reserved.
 %%
 -module(jsonpath).
--export([search/2, replace/3]).
+-export([search/2,
+         replace/3,
+         add/3,
+         delete/2]).
 
 -include_lib("kernel/include/logger.hrl").
 %% -define(DBG(Fmt, Args), ?LOG_DEBUG(Fmt, Args)).
 
 search(Path, Data) when is_binary(Data) ->
-    search(Path, jsx:decode(Data));
-search(Path, Data) ->
+    search(Path, jsx:decode(Data, [return_maps]));
+search(Path, Data) when is_map(Data) ->
     search_data(parse_path(Path), Data).
 
 replace(Path, Replace, Data) when is_binary(Data) ->
-    replace(Path, Replace, jsx:decode(Data));
-replace(Path, Replace, Data) ->
-    replace_data(parse_path(Path), Replace, Data).
+    replace(Path, Replace, jsx:decode(Data, [return_maps]));
+replace(Path, Replace, Data) when is_map(Data) ->
+    handle_data(parse_path(Path), {op_replace, Replace}, Data).
 
-replace_data([SearchHead|SearchTail], Replace, Structure) ->
+add(Path, Value, Data) when is_binary(Data) ->
+    add(Path, Value, jsx:decode(Data, [return_maps]));
+add(Path, Value, Data) when is_map(Data) ->
+    handle_data(parse_path(Path), {op_add, Value}, Data).
+
+delete(Path, Data) when is_binary(Data) ->
+    delete(Path, jsx:decode(Data, [return_maps]));
+delete(Path, Data) when is_map(Data) ->
+    handle_data(parse_path(Path), op_delete, Data).
+
+handle_data([SearchHead|SearchTail], Replace, Structure) ->
     case Structure of
         Structure when is_map(Structure) ->
             %% ?DBG("map: ~p", [Structure]),
-            replace_map([SearchHead|SearchTail], Replace, Structure);
-        {TupleList} ->
-            %% ?DBG("tuple list: ~p", [TupleList]),
-            { replace_tuple_list([SearchHead|SearchTail], Replace, TupleList) };
-        List ->
+            handle_map([SearchHead|SearchTail], Replace, Structure);
+        List when is_list(List) ->
             %% ?DBG("looks like a list: ~p", [List]),
             replace_list([SearchHead|SearchTail], Replace, List)
     end.
 
 replace_list([SearchHead|SearchTail], Replace, List) ->
     try
-        Index = list_to_integer(binary_to_list(SearchHead)) + 1,
+        %% Zero-index requires adding 1
+        Index = binary_to_integer(SearchHead) + 1,
         case (Index > length(List)) of
             true ->
                 %% ?DBG("Index out of range ~p for list size ~p", [Index, length(List)]),
                 undefined;
             false ->
-                replace_list([Index|SearchTail], Replace, List, 1, [])
+                handle_list([Index | SearchTail], Replace, List, 1, [])
         end
     catch
         _:_ ->
             %% ?DBG("This is not an integer: ~p", [SearchHead]),
             undefined
     end.
-replace_list([_SearchHead|_SearchTail], _Replace, [], _Count, Accum) ->
-    %% ?DBG("at the end of this list with accum: ~p", [Accum]),
-    lists:reverse(Accum);
-replace_list([SearchHead|SearchTail], Replace, [Head|Tail], Count, Accum) ->
-    %% ?DBG("list: ~p", [Head|Tail]),
-    Data = case SearchHead of
-               Count ->
-                   %% ?DBG("Found index ~p", [Count]),
-                   case SearchTail of
-                       [] ->
-                           Replace;
-                       _SearchTail ->
-                           %% ?DBG("Not last, so no replacement, but replaceing into: ~p", [Head]),
-                           replace_data(SearchTail, Replace, Head)
-                   end;
-               _SearchHead ->
-                   %% ?DBG("Not index ~p", [Count]),
-                   Head
-           end,
-    replace_list([SearchHead|SearchTail], Replace, Tail, Count+1, [Data|Accum]).
 
+handle_list([_SearchHead | _SearchTail], _OpVal, [], _Count, Acc) ->
+    lists:reverse(Acc);
+handle_list([Count], OpVal, [Head | Tail], Count, Acc) ->
+    handle_list([Count], OpVal, Tail, Count + 1, perform_op(OpVal, Count, Head, Acc));
+handle_list([Count | SearchTail], OpVal, [Head | Tail], Count, Acc) ->
+    NAcc = [handle_data(SearchTail, OpVal, Head) | Acc],
+    handle_list([Count|SearchTail], OpVal, Tail, Count + 1, NAcc);
+handle_list([SearchHead|SearchTail], OpVal, [Head | Tail], Count, Acc) ->
+    handle_list([SearchHead|SearchTail], OpVal, Tail, Count + 1, [Head | Acc]).
 
-replace_tuple_list([SearchHead|SearchTail], Replace, TupleList) ->
-    replace_tuple_list([SearchHead|SearchTail], Replace, TupleList, []).
-replace_tuple_list([_SearchHead|_SearchTail], _Replace, [], Accum) ->
-    %% ?DBG("at the end of this tuple list with accum: ~p", [Accum]),
-    lists:reverse(Accum);
-replace_tuple_list([SearchHead|SearchTail], Replace, [Head|Tail], Accum) ->
-    %% ?DBG("tuple: ~p", [Head]),
-    Data = case Head of
-               {SearchHead, Value} ->
-                   %% ?DBG("Found match for ~p: ~p", [SearchHead, {SearchHead, Value}]),
-                   case SearchTail of
-                       [] ->
-                           {SearchHead, Replace};
-                       _SearchTail ->
-                           %% ?DBG("Not last, so no replacement, but replaceing into : ~p",[Head]),
-                           {SearchHead, replace_data(SearchTail, Replace, Value) }
-                   end;
-               _Other ->
-                   %% ?DBG("No match for ~p: ~p", [SearchHead, _Other]),
-                   Head
-           end,
-    %% ?DBG("continue processing tail: ~p", [Tail]),
-    replace_tuple_list([SearchHead|SearchTail], Replace, Tail, [Data|Accum]).
-
-replace_map([SearchHead|SearchTail], Replace, Map) when is_map_key(SearchHead, Map) ->
+handle_map([SearchHead|SearchTail], OpVal, Map) when is_map_key(SearchHead, Map) ->
     #{SearchHead := Value} = Map,
     %% ?DBG("Found match for ~p: ~p", [SearchHead, {SearchHead, Value}]),
     case SearchTail of
         [] ->
-            Map#{SearchHead => Replace};
+            perform_op(OpVal, SearchHead, Value, Map);
         _SearchTail ->
             %% ?DBG("Not last, so no replacement, but replacing",[]),
-            Map#{SearchHead => replace_data(SearchTail, Replace, Value)}
+            Map#{SearchHead => handle_data(SearchTail, OpVal, Value)}
     end;
-replace_map(_, _Replace, Map) ->
+handle_map(_, _ReplaceValue, Map) ->
     Map.
+
+perform_op({op_add, Value}, Key, OldValue, Data) when is_map(Data) andalso is_map(Value) ->
+    Data#{Key => maps:merge(OldValue, Value)};
+perform_op({op_add, Value}, _Key, [], Data) when is_list(Data) ->
+    [Value | Data];
+perform_op({op_add, Value}, _Key, OldValue, Data) when is_list(Data) ->
+    [Value, OldValue | Data];
+perform_op({op_replace, Value}, Key, _OldValue, Data) when is_map(Data) ->
+    Data#{Key => Value};
+perform_op({op_replace, Value}, _Key, _OldValue, Data) when is_list(Data) ->
+    [Value | Data];
+perform_op(op_delete, Key, _OldValue, Data) when is_map(Data) ->
+    maps:remove(Key, Data);
+perform_op(op_delete, _Key, _OldValue, Data) when is_list(Data) ->
+    Data.
 
 search_data([], Data) ->
     Data;
 search_data([Head|Tail], Data) ->
-    %% ?DBG("Searching for ~p in ~p", [Head,Data]),
     case Head of
         <<>> ->
             search_data(Tail, Data);
@@ -137,19 +127,19 @@ search_data([Head|Tail], Data) ->
                 Data when is_map(Data) ->
                     %% ?DBG("found map: ~p", [Data]),
                     search_map([Head|Tail], Data);
-                {_Tuple} ->
-                    %% ?DBG("found tuple: ~p", [_Tuple]),
-                    search_tuple([Head|Tail], Data);
-                _List ->
-                    %% ?DBG("found list: ~p", [_List]),
-                    search_list([Head|Tail], Data)
+                Data when is_list(Data) ->
+                    %% ?DBG("found list: ~p", [Data]),
+                    search_list([Head|Tail], Data);
+                _ ->
+                    undefined
             end
     end.
 
 search_list([Head|Tail], List) ->
     %% ?DBG("list search for ~p in ~p",[Head, List]),
     try
-        Index = list_to_integer(binary_to_list(Head)) + 1,
+        %% indexes are zero based, so add 1
+        Index = binary_to_integer(Head) + 1,
         case (Index > length(List)) of
             true ->
                 undefined;
@@ -160,17 +150,6 @@ search_list([Head|Tail], List) ->
         _:_ ->
             %% ?DBG("that wasn't an integer",[]),
             undefined
-    end.
-
-search_tuple([Head|Tail], Tuple) ->
-    {TuplePayload} = Tuple,
-    case lists:keyfind(Head, 1, TuplePayload) of
-        false ->
-            %% ?DBG("did not find tuple value for ~p. done.", [Head]),
-            undefined;
-        {Head,Value} ->
-            %% ?DBG("found tuple value for ~p: ~p", [Head,Value]),
-            search_data(Tail, Value)
     end.
 
 search_map([Head|Tail], Map) when is_map_key(Head, Map) ->
