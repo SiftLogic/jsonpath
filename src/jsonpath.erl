@@ -1,55 +1,67 @@
+
+%% @copyright (c) 2012-2023 Gene Stevens.  All Rights Reserved.
+%% @author Gene Stevens <gene@triplenexus.org>
+%% @doc Fast javascript-like "path" notation for querying and updating JSON
 %%
 %% jsonpath - json data retrieval and updates via
 %%            javascript-like notation
 %%
-%% Copyright (c) 2012 Gene Stevens.  All Rights Reserved.
-%%
-%% This file is provided to you under the Apache License,
-%% Version 2.0 (the "License"); you may not use this file
-%% except in compliance with the License.  You may obtain
-%% a copy of the License at
-%%
-%%   http://www.apache.org/licenses/LICENSE-2.0
-%%
-%% Unless required by applicable law or agreed to in writing,
-%% software distributed under the License is distributed on an
-%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-%% KIND, either express or implied.  See the License for the
-%% specific language governing permissions and limitations
-%% under the License.
-%%
-%% @doc Fast javascript-like "path" notation for querying and updating JSON
-%% @author Gene Stevens <gene@triplenexus.org>
-%% @copyright (c) 2012 Gene Stevens.  All Rights Reserved.
+%% This module provides a simple way to query and update JSON data using a path
+%% notation similar to javascript.  The path notation is a string of property
+%% names separated by dots.  For example, the path "menu.popup.menuitem[1]"
+%% would return the second element of the array "menuitem" in the object.
 %%
 -module(jsonpath).
--export([search/2,
-         replace/3,
-         add/3,
-         delete/2]).
+-export([add/3,
+         delete/2,
+         search/2,
+         replace/3]).
 
 -include_lib("kernel/include/logger.hrl").
 %% -define(DBG(Fmt, Args), ?LOG_DEBUG(Fmt, Args)).
 
-search(Path, Data) when is_binary(Data) ->
-    search(Path, jsx:decode(Data, [return_maps]));
-search(Path, Data) when is_map(Data) ->
-    search_data(parse_path(Path), Data).
+%% Copied from `jsx` excluding the with_tail option
+-type json_term() :: [{binary() | atom(), json_term()}] | [{},...]
+    | [json_term()] | []
+    | #{ binary() | atom() => json_term() }
+    | true | false | null
+    | integer() | float()
+    | binary() | atom()
+    | calendar:datetime().
 
-replace(Path, Replace, Data) when is_binary(Data) ->
-    replace(Path, Replace, jsx:decode(Data, [return_maps]));
-replace(Path, Replace, Data) when is_map(Data) ->
-    handle_data(parse_path(Path), {op_replace, Replace}, Data).
-
+%% @doc Adds a new property to the JSON object at path, or adds a new element to array at path
+-spec add(binary(), json_term(), json_term() | binary()) -> json_term().
 add(Path, Value, Data) when is_binary(Data) ->
     add(Path, Value, jsx:decode(Data, [return_maps]));
 add(Path, Value, Data) when is_map(Data) ->
     handle_data(parse_path(Path), {op_add, Value}, Data).
 
+%% @doc Deletes a property from the JSON object at path, or deletes an element from array at path
+-spec delete(binary(), json_term() | binary()) -> json_term().
 delete(Path, Data) when is_binary(Data) ->
     delete(Path, jsx:decode(Data, [return_maps]));
 delete(Path, Data) when is_map(Data) ->
     handle_data(parse_path(Path), op_delete, Data).
+
+%% @doc Searches for a property in the JSON object at path, or searches for an element in array at path
+-spec search(binary(), json_term() | binary()) -> any().
+search(Path, Data) when is_binary(Data) ->
+    search(Path, jsx:decode(Data, [return_maps]));
+search(Path, Data) when is_map(Data) ->
+    search_data(parse_path(Path), Data).
+
+%% @doc Replaces a property in the JSON object at path,
+%% or replaces an element in array at path.
+%% If the replacement value is a function,
+%% it will be called with the current value as the only argument
+%% and the return value will be used as the replacement value.
+-spec replace(binary(), json_term() | fun((json_term()) -> json_term()), json_term() | binary()) -> json_term().
+replace(Path, Replace, Data) when is_binary(Data) ->
+    replace(Path, Replace, jsx:decode(Data, [return_maps]));
+replace(Path, Fun, Data) when is_map(Data) andalso is_function(Fun, 1) ->
+    handle_data(parse_path(Path), {op_transform, Fun}, Data);
+replace(Path, Replace, Data) when is_map(Data) ->
+    handle_data(parse_path(Path), {op_replace, Replace}, Data).
 
 handle_data([SearchHead|SearchTail], Replace, Structure) ->
     case Structure of
@@ -111,6 +123,10 @@ perform_op({op_replace, Value}, Key, _OldValue, Data) when is_map(Data) ->
     Data#{Key => Value};
 perform_op({op_replace, Value}, _Key, _OldValue, Data) when is_list(Data) ->
     [Value | Data];
+perform_op({op_transform, Fun}, Key, OldValue, Data) when is_map(Data) ->
+    Data#{Key => Fun(OldValue)};
+perform_op({op_transform, Fun}, _Key, OldValue, Data) when is_list(Data) ->
+    [Fun(OldValue) | Data];
 perform_op(op_delete, Key, _OldValue, Data) when is_map(Data) ->
     maps:remove(Key, Data);
 perform_op(op_delete, _Key, _OldValue, Data) when is_list(Data) ->

@@ -96,6 +96,40 @@ replace_array_index_test() ->
                             <<"value">> => <<"Close">>}]}}},
        jsonpath:replace(<<"menu.popup.menuitem[1].value">>, <<"foo">>, ?JSON)).
 
+
+replace_single_node_fun_test() ->
+    TransformFun = fun(Val) -> case Val of <<"file">> -> <<"foo">>; _ -> Val end end,
+    ?assertEqual(
+        #{<<"menu">> =>
+        #{<<"id">> => <<"foo">>,
+            <<"value">> => <<"File">>,
+            <<"popup">> =>
+            #{<<"menuitem">> =>
+            [#{<<"onclick">> => <<"CreateNewDoc()">>,
+                <<"value">> => <<"New">>},
+                #{<<"onclick">> => <<"OpenDoc()">>,
+                    <<"value">> => <<"Open">>},
+                #{<<"onclick">> => <<"CloseDoc()">>,
+                    <<"value">> => <<"Close">>}]}}},
+        jsonpath:replace(<<"menu.id">>, TransformFun, ?JSON)).
+
+replace_array_index_fun_test() ->
+    TransformFun = fun(Val) -> case Val of <<"Open">> -> <<"foo">>; _ -> Val end end,
+    ?assertEqual(
+        #{<<"menu">> =>
+        #{<<"id">> => <<"file">>,
+            <<"value">> => <<"File">>,
+            <<"popup">> =>
+            #{<<"menuitem">> =>
+            [#{<<"onclick">> => <<"CreateNewDoc()">>,
+                <<"value">> => <<"New">>},
+                #{<<"onclick">> => <<"OpenDoc()">>,
+                    <<"value">> => <<"foo">>},
+                #{<<"onclick">> => <<"CloseDoc()">>,
+                    <<"value">> => <<"Close">>}]}}},
+        jsonpath:replace(<<"menu.popup.menuitem[1].value">>, TransformFun, ?JSON)).
+
+
 delete_single_node_test() ->
     ?assertEqual(
         #{<<"menu">> =>
