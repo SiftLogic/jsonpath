@@ -1,19 +1,26 @@
 ERL ?= erl
 APP := jsonpath
+REBAR := rebar3
 
 .PHONY: deps
 
-all: deps 
-	@rebar compile
+all: deps xref
+	$(REBAR) compile
 
 deps:
-	@rebar get-deps
+	$(REBAR) get-deps
+
+xref:
+	$(REBAR) xref
 
 clean:
-	@rebar clean
+	$(REBAR) clean
+
+test:
+	$(REBAR) eunit
 
 distclean: clean
-	@rebar delete-deps
+	$(REBAR) delete-deps
 
 docs:
 	@erl -noshell -run edoc_run application '$(APP)' '"."' '[]'

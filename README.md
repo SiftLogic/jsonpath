@@ -1,6 +1,6 @@
 # JSONPath
 
-JSONPath is an Erlang-based fast JSON data retrieval and update module.  It operates on binary data and uses [jiffy](/davisp/jiffy) for fast and efficient decoding of binary JSON into structured Erlang terms and back again.
+JSONPath is an Erlang-based fast JSON data retrieval and update module.  It operates on binary data and uses [jsx](https://github.com/talentdeficit/jsx) for fast and efficient decoding of binary JSON into structured Erlang terms and back again.
 
 ## JSONPath is simple
 
@@ -43,13 +43,13 @@ Using an 80KB Foursquare API venue search document to read a very specific node 
 Pre-decode the binary document into a structured Erlang term (via jiffy) and run that query one million times:
 
 ```erlang
-(jsonpath@127.0.0.1)3> JiffyData = jiffy:decode(Data2).
-{[{<<"meta">>,{[{<<"code">>,200}]}},
-  {<<"notifications">>,
-   [{[{<<"item">>,{[{<<"unreadCount">>,2}]}},
-      {<<"type">>,<<"notificationTray">>}]}]},
+(jsonpath@127.0.0.1)3> JsxData = jsx:decode(Data2).
+#{<<"meta">> := #{<<"code">> := 200},
+  <<"notifications">> :=
+   {<<"item">> := #{<<"unreadCount">> := 2},
+      <<"type">> := <<"notificationTray">>,
       ...
-(jsonpath@127.0.0.1)4> jsonpath_tests:bench(jsonpath, search, [<<"response.venues[6].categories[0].shortName">>, JiffyData], 1000000).
+(jsonpath@127.0.0.1)4> jsonpath_tests:bench(jsonpath, search, [<<"response.venues[6].categories[0].shortName">>, JsxData], 1000000).
 Range: 0 - 8853 mics
 Median: 5 mics
 Average: 5 mics
@@ -65,18 +65,18 @@ Using the same small JSON document from the first example, replace the content o
 
 ```erlang
 (jsonpath@127.0.0.1)9> Json = jsonpath:replace(<<"menu.popup.menuitem[1].onclick">>, <<"NewFunction()">>, Data).
-{[{<<"menu">>,
-   {[{<<"id">>,<<"file">>},
-     {<<"value">>,<<"File">>},
-     {<<"popup">>,
-      {[{<<"menuitem">>,
-         [{[{<<"value">>,<<"New">>},
-            {<<"onclick">>,<<"CreateNewDoc()">>}]},
-          {[{<<"value">>,<<"Open">>},
-            {<<"onclick">>,<<"NewFunction()">>}]},
-          {[{<<"value">>,<<"Close">>},
-            {<<"onclick">>,<<"CloseDoc()">>}]}]}]}}]}}]}
-(jsonpath@127.0.0.1)10> NewData = jiffy:encode(Json).
-<<"{\"menu\":{\"id\":\"file\",\"value\":\"File\",\"popup\":{\"menuitem\":[{\"value\":\"New\",\"onclick\":\"CreateNewDoc()\"},{\"value\":\"Open\","...>>
+#{<<"menu">> =>
+    #{<<"id">> => <<"file">>,
+      <<"popup">> =>
+        #{<<"menuitem">> =>
+            [#{<<"onclick">> => <<"CreateNewDoc()">>,
+               <<"value">> => <<"New">>},
+             #{<<"onclick">> => <<"NewFunction()">>,
+               <<"value">> => <<"Open">>},
+             #{<<"onclick">> => <<"CloseDoc()">>,
+               <<"value">> => <<"Close">>}]},
+      <<"value">> => <<"File">>}}
+(jsonpath@127.0.0.1)10> NewData = jsx:encode(Json).
+<<"{\"menu\":{\"id\":\"file\",\"popup\":{\"menuitem\":[{\"onclick\":\"CreateNewDoc()\",\"value\":\"New\"},{\"onclick\":\"NewFunction()\",\"val"...>>
 (jsonpath@127.0.0.1)11> 
 ```
