@@ -32,23 +32,23 @@
 %% @doc Adds a new property to the JSON object at path, or adds a new element to array at path
 -spec add(binary(), json_term(), json_term() | binary()) -> json_term().
 add(Path, Value, Data) when is_binary(Data) ->
-    add(Path, Value, jsx:decode(Data, [return_maps]));
+    add(Path, Value, json:decode(Data));
 add(Path, Value, Data) when is_map(Data) ->
-    handle_data(parse_path(Path), {op_add, Value}, Data).
+    handle_data(parse_path2(Path), {op_add, Value}, Data).
 
 %% @doc Deletes a property from the JSON object at path, or deletes an element from array at path
 -spec delete(binary(), json_term() | binary()) -> json_term().
 delete(Path, Data) when is_binary(Data) ->
-    delete(Path, jsx:decode(Data, [return_maps]));
+    delete(Path, json:decode(Data));
 delete(Path, Data) when is_map(Data) ->
-    handle_data(parse_path(Path), op_delete, Data).
+    handle_data(parse_path2(Path), op_delete, Data).
 
 %% @doc Searches for a property in the JSON object at path, or searches for an element in array at path
 -spec search(binary(), json_term() | binary()) -> any().
 search(Path, Data) when is_binary(Data) ->
-    search(Path, jsx:decode(Data, [return_maps]));
+    search(Path, json:decode(Data));
 search(Path, Data) when is_map(Data) ->
-    search_data(parse_path(Path), Data).
+    search_data(parse_path2(Path), Data).
 
 %% @doc Replaces a property in the JSON object at path,
 %% or replaces an element in array at path.
@@ -57,7 +57,7 @@ search(Path, Data) when is_map(Data) ->
 %% and the return value will be used as the replacement value.
 -spec replace(binary(), json_term() | fun((json_term()) -> json_term()), json_term() | binary()) -> json_term().
 replace(Path, Replace, Data) when is_binary(Data) ->
-    replace(Path, Replace, jsx:decode(Data, [return_maps]));
+    replace(Path, Replace, json:decode(Data));
 replace(Path, Fun, Data) when is_map(Data) andalso is_function(Fun, 1) ->
     handle_data(parse_path(Path), {op_transform, Fun}, Data);
 replace(Path, Replace, Data) when is_map(Data) ->
@@ -179,3 +179,30 @@ search_map([_Head | _Tail], _Map) ->
 parse_path(Path) ->
     Split = binary:split(Path, [<<".">>,<<"[">>,<<"]">>], [global]),
     lists:filter(fun(X) -> X =/= <<>> end, Split).
+
+parse_path2(<<"$.", Path/binary>>) ->
+    parse_path2_(Path, <<>>, []);
+parse_path2(_) ->
+    throw(invalid_path).
+
+parse_path2_(<<>>, <<>>, Parts) ->
+    lists:reverse(Parts);
+parse_path2_(<<>>, Part, Parts) ->
+    lists:reverse([Part | Parts]);
+parse_path2_(<<$[, Rest/binary>>, _Part, Parts) ->
+    parse_path2_(Rest, {array, <<>>}, Parts);
+parse_path2_(<<$], Rest/binary>>, {array, Part}, Parts) ->
+    parse_path2_(Rest, <<>>, [Part, Parts]);
+parse_path2_(<<Char:1/binary, Rest/binary>>, {array, Part}, Parts) ->
+    parse_path2_(Rest, {array, <<Part/binary, Char/binary>>}, Parts);
+parse_path2_(<<"..", Rest/binary>>, Part, Parts) ->
+    parse_path2_(Rest, {descendants, <<>>}, [Part | Parts]);
+parse_path2_(<<Char:1/binary, Rest/binary>>, {descendants, Part}, Parts) ->
+    parse_path2_(Rest, {descendants, <<Part/binary, Char/binary>>}, Parts);
+parse_path2_(<<$., Rest/binary>>, Part, Parts) ->
+    parse_path2_(Rest, <<>>, [Part | Parts]);
+parse_path2_(<<$*, Rest/binary>>, _Part, Parts) ->
+    parse_path2_(Rest, <<>>, [wildcard | Parts]).
+
+
+
