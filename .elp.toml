@@ -1,0 +1,9 @@
+[build_info]
+apps = [
+    {name = "jsonpath", dir = ".", "src_dirs" = ["src"], "include_dirs" = ["include", "src"]}
+]
+deps = [
+]
+
+[eqwalizer]
+enable_all = false
